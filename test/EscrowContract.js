@@ -1,6 +1,5 @@
 const { expect } = require('chai')
 const { ethers } = require('hardhat')
-const { loadFixture } = require('@nomicfoundation/hardhat-toolbox/network-helpers')
 
 describe('EscrowContract', () => {
   // Declare variables for contract instances and addresses
@@ -11,7 +10,8 @@ describe('EscrowContract', () => {
     token,
     tokenAddress,
     escrowContractAddress,
-    buyerAddress
+    buyerAddress,
+    sellerAddress
 
   // Function to deploy contracts and set up initial state
   async function deployContracts() {
@@ -25,8 +25,7 @@ describe('EscrowContract', () => {
       buyer.address,
       arbitrator.address,
       1000000,
-      tokenAddress,
-      { gasPrice: 5000000000 }
+      tokenAddress
     )
 
     escrowContractAddress = await escrowContract.getAddress()
@@ -85,6 +84,20 @@ describe('EscrowContract', () => {
 
       // Try to make another payment (should fail)
       await expect(escrowContract.connect(buyer).pay()).to.be.revertedWith('Invalid status')
+    })
+
+    it('should reject incoming ETH and revert with the expected error message', async () => {
+      // Try to send ETH to the contract (you can adjust the value as needed)
+      const sendEtherTransaction = async () => {
+        return buyer.sendTransaction({
+          to: escrowContractAddress,
+          value: 10000,
+        })
+      }
+      // Check if the transaction reverts with the expected error message
+      await expect(sendEtherTransaction()).to.be.revertedWith(
+        'This contract does not accept ETH directly'
+      )
     })
   })
 
@@ -153,6 +166,27 @@ describe('EscrowContract', () => {
       // Resolve the dispute
       const resolutionTx = await escrowContract.connect(arbitrator).resolveDispute(true)
       expect(resolutionTx).to.emit(escrowContract, 'Resolved').withArgs(arbitrator.address, 5)
+    })
+
+    it('should transition back to Paid status after dispute resolution with false', async () => {
+      // Transfer tokens to the buyer's address
+      await token.transfer(buyerAddress, 1000000)
+
+      // Approve the contract to spend tokens on behalf of the buyer
+      await token.connect(buyer).approve(escrowContractAddress, 1000000)
+
+      // Make a payment from the buyer's address
+      await escrowContract.connect(buyer).pay()
+
+      // Initiate a dispute
+      await escrowContract.connect(buyer).dispute()
+
+      // Resolve the dispute with a resolution of false
+      await escrowContract.connect(arbitrator).resolveDispute(false)
+
+      // Check if status transitions back to Paid
+      const contractStatus = await escrowContract.status()
+      expect(contractStatus).to.equal(1, 'Status should be Paid')
     })
   })
 
