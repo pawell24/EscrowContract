@@ -99,6 +99,37 @@ describe('EscrowContract', () => {
         'This contract does not accept ETH directly'
       )
     })
+
+    it('should not allow the buyer to pay twice', async () => {
+      // Transfer tokens to the buyer's address
+      await token.transfer(buyerAddress, 1000000)
+
+      // Approve the contract to spend tokens on behalf of the buyer
+      await token.connect(buyer).approve(escrowContractAddress, 1000000)
+
+      // Make a payment from the buyer's address
+      await escrowContract.connect(buyer).pay()
+
+      // Try to make another payment (should fail)
+      await expect(escrowContract.connect(buyer).pay()).to.be.revertedWith('Invalid status')
+    })
+
+    it('should allow payment with different token amounts', async () => {
+      const paymentAmount = 5000000
+
+      // Transfer tokens to the buyer's address
+      await token.transfer(buyerAddress, paymentAmount)
+
+      // Approve the contract to spend tokens on behalf of the buyer
+      await token.connect(buyer).approve(escrowContractAddress, paymentAmount)
+
+      // Make a payment from the buyer's address
+      await escrowContract.connect(buyer).pay()
+
+      // Check if status transitions to Paid
+      const contractStatus = await escrowContract.status()
+      expect(contractStatus).to.equal(1, 'Status should be Paid')
+    })
   })
 
   // Test suite for dispute resolution
@@ -188,6 +219,61 @@ describe('EscrowContract', () => {
       const contractStatus = await escrowContract.status()
       expect(contractStatus).to.equal(1, 'Status should be Paid')
     })
+
+    it('should not allow a non-arbitrator to resolve a dispute with false', async () => {
+      // Make a payment
+      await token.connect(buyer).approve(escrowContractAddress, 1000000)
+      await escrowContract.connect(buyer).pay()
+
+      // Initiate a dispute
+      await escrowContract.connect(buyer).dispute()
+
+      // Try to resolve the dispute as a non-arbitrator with false (should fail)
+      const [nonArbitrator] = await ethers.getSigners()
+
+      await expect(escrowContract.connect(nonArbitrator).resolveDispute(false)).to.be.revertedWith(
+        'You are not the arbitrator'
+      )
+    })
+
+    it('should not allow a non-arbitrator to resolve a dispute with true', async () => {
+      // Make a payment
+      await token.connect(buyer).approve(escrowContractAddress, 1000000)
+      await escrowContract.connect(buyer).pay()
+
+      // Initiate a dispute
+      await escrowContract.connect(buyer).dispute()
+
+      // Try to resolve the dispute as a non-arbitrator with true (should fail)
+      const [nonArbitrator] = await ethers.getSigners()
+
+      await expect(escrowContract.connect(nonArbitrator).resolveDispute(true)).to.be.revertedWith(
+        'You are not the arbitrator'
+      )
+    })
+
+    it('should revert if arbitrator tries to resolve dispute with an invalid status', async () => {
+      // Try to resolve dispute in Created status (should fail)
+      await expect(escrowContract.connect(arbitrator).resolveDispute(true)).to.be.revertedWith(
+        'Invalid status'
+      )
+    })
+
+    it('should not allow a non-arbitrator to resolve a dispute', async () => {
+      // Make a payment
+      await token.connect(buyer).approve(escrowContractAddress, 1000000)
+      await escrowContract.connect(buyer).pay()
+
+      // Initiate a dispute
+      await escrowContract.connect(buyer).dispute()
+
+      // Try to resolve the dispute as a non-arbitrator (should fail)
+      const [nonArbitrator] = await ethers.getSigners()
+
+      await expect(escrowContract.connect(nonArbitrator).resolveDispute(true)).to.be.revertedWith(
+        'You are not the arbitrator'
+      )
+    })
   })
 
   // Test suite for delivery process
@@ -242,6 +328,45 @@ describe('EscrowContract', () => {
       // Try to complete the transaction before delivery (should fail)
       await expect(escrowContract.connect(buyer).complete()).to.be.revertedWith('Invalid status')
     })
+
+    it('should not allow the buyer to complete after dispute', async () => {
+      // Make a payment
+      await token.connect(buyer).approve(escrowContractAddress, 1000000)
+      await escrowContract.connect(buyer).pay()
+
+      // Initiate a dispute
+      await escrowContract.connect(buyer).dispute()
+
+      // Try to complete the transaction after dispute (should fail)
+      await expect(escrowContract.connect(buyer).complete()).to.be.revertedWith('Invalid status')
+    })
+
+    it('should not allow the buyer to deliver after dispute', async () => {
+      // Make a payment
+      await token.connect(buyer).approve(escrowContractAddress, 1000000)
+      await escrowContract.connect(buyer).pay()
+
+      // Initiate a dispute
+      await escrowContract.connect(buyer).dispute()
+
+      // Try to deliver the item after dispute (should fail)
+      await expect(escrowContract.connect(buyer).deliver()).to.be.revertedWith('Invalid status')
+    })
+
+    it('should not allow the buyer to deliver after dispute resolution', async () => {
+      // Make a payment
+      await token.connect(buyer).approve(escrowContractAddress, 1000000)
+      await escrowContract.connect(buyer).pay()
+
+      // Initiate a dispute
+      await escrowContract.connect(buyer).dispute()
+
+      // Resolve the dispute
+      await escrowContract.connect(arbitrator).resolveDispute(true)
+
+      // Try to deliver the item after dispute resolution (should fail)
+      await expect(escrowContract.connect(buyer).deliver()).to.be.revertedWith('Invalid status')
+    })
   })
 
   // Test suite for events emitted by the contract
@@ -287,6 +412,26 @@ describe('EscrowContract', () => {
       // Resolve the dispute
       const resolutionTx = await escrowContract.connect(arbitrator).resolveDispute(true)
       expect(resolutionTx).to.emit(escrowContract, 'Resolved').withArgs(arbitrator.address, 5)
+    })
+
+    it('should initialize the contract with different price and token address', async function () {
+      const EscrowContract = await ethers.getContractFactory('EscrowContract')
+      const newPrice = 2000000
+      const newToken = await ERC20Mock.deploy('ANOTHER TOKEN', 'ANT')
+      const newTokenAddress = await newToken.getAddress()
+
+      const newEscrowContract = await EscrowContract.deploy(
+        buyer.address,
+        arbitrator.address,
+        newPrice,
+        newTokenAddress
+      )
+
+      const contractPrice = await newEscrowContract.price()
+      const contractToken = await newEscrowContract.token()
+
+      expect(contractPrice).to.equal(newPrice, 'Price is incorrect')
+      expect(contractToken).to.equal(newTokenAddress, 'Token address is incorrect')
     })
   })
 })
