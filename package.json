@@ -7,5 +7,10 @@
     "ganache-cli": "^6.12.2",
     "hardhat": "^2.19.2",
     "solidity-coverage": "^0.8.5"
+  },
+  "scripts": {
+    "deploy": "npx hardhat run scripts/deploy.js --NETWORK_NAME hardhat",
+    "test": "npx hardhat test",
+    "coverage": "npx hardhat coverage --network hardhat"
   }
 }
